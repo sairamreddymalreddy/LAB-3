@@ -49,6 +49,8 @@ struct Rigidbody {
     Vec3 color; // color for balls RGB values
 };
 
+std::vector<Rigidbody> spheres;
+
 //==================================================
 // Global Variables
 //==================================================
@@ -60,7 +62,7 @@ double restitution = 0.8;
 double floorLevel = 0.0;
 double groundFriction = 0.99;
 
-std::vector<Rigidbody> spheres;
+
 
 int g_windowWidth = 800;
 int g_windowHeight = 600;
