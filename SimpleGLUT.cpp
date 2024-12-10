@@ -33,76 +33,107 @@
 
 #include "Quaternion.h"
 #include "Interpolation.h"
-#include <cstdlib>
-#include <ctime>
 
 
 //==================================================
 // Sphere Data Structure
 //==================================================
-struct Sphere {
+struct Rigidbody {
     Vec3 pos;
     Vec3 vel;
-    Vec3 angVel;     // Angular velocity vector
-    Quaternion ori;  // Orientation
+    Vec3 angVel;     // Angular velocity vector (radians per second)
+    Quaternion ori;  // Orientation quaternion
     double radius;
     double mass;
-    Vec3 color; // Add this line: a color 
+    double momentOfInertia;
+    Vec3 color; // color for balls RGB values
 };
 
 //==================================================
 // Global Variables
 //==================================================
-static const int NUM_SPHERES = 3;
-static double dt = 0.016;
-static double restitution = 0.8;
-static double floorLevel = 0.0;
-static double groundFriction = 0.99;
+//physics properties
+double NUM_SPHERES = 13;
+//change dt as you need
+double dt = 0.016; 
+double restitution = 0.8;
+double floorLevel = 0.0;
+double groundFriction = 0.99;
 
-std::vector<Sphere> spheres;
+std::vector<Rigidbody> spheres;
 
 int g_windowWidth = 800;
 int g_windowHeight = 600;
+
+// Timing Variables
+double lastFrameTime = 0.0; 
+double totalTime = 0.0;
 
 //==================================================
 // Initialization
 //==================================================
 void initSpheres() {
     spheres.resize(NUM_SPHERES);
-    std::srand((unsigned)std::time(0));
+    std::srand(static_cast<unsigned>(std::time(0)));
     for (int i = 0; i < NUM_SPHERES; i++) {
-        spheres[i].radius = 1.0;
-        spheres[i].mass = 1.0;
-        spheres[i].pos.x = (std::rand() % 10) - 5.0;
-        spheres[i].pos.y = 5.0 + (std::rand() % 5);
-        spheres[i].pos.z = (std::rand() % 10) - 5.0;
+        //physics properties values
+        spheres[i].radius = 1;
+        spheres[i].mass = 1;
 
-        spheres[i].vel.x = ((std::rand() % 100) / 100.0 - 0.5) * 2.0;
+        // Random position within a range
+        spheres[i].pos.x = (std::rand() % 10) - 5.0; // [-5, 5]
+        spheres[i].pos.y = 10.0 + (std::rand() % 5); // [5, 10]
+        spheres[i].pos.z = (std::rand() % 10) - 5.0; // [-5, 5]
+
+        // Calculating moment of inertia for a solid sphere: I = 2/5 m r^2
+        spheres[i].momentOfInertia = (2.0 / 5.0) * spheres[i].mass * (spheres[i].radius * spheres[i].radius);
+
+        // Random linear velocity
+        spheres[i].vel.x = ((std::rand() % 100) / 100.0 - 0.5) * 2.0; // [-1, 1]
         spheres[i].vel.y = 0.0;
-        spheres[i].vel.z = ((std::rand() % 100) / 100.0 - 0.5) * 2.0;
+        spheres[i].vel.z = ((std::rand() % 100) / 100.0 - 0.5) * 2.0; // [-1, 1]
 
-        spheres[i].ori = { 1,0,0,0 };
-        spheres[i].angVel.x = ((std::rand() % 100) / 100.0 - 0.5) * 2.0;
-        spheres[i].angVel.y = ((std::rand() % 100) / 100.0 - 0.5) * 2.0;
-        spheres[i].angVel.z = ((std::rand() % 100) / 100.0 - 0.5) * 2.0;
+        //Initialize random orientation for the ball using Euler angles
+        double roll = ((std::rand() % 360) / 180.0) * M_PI;   // [0, 2PI]
+        double pitch = ((std::rand() % 360) / 180.0) * M_PI;  // [0, 2PI]
+        double yaw = ((std::rand() % 360) / 180.0) * M_PI;    // [0, 2PI]
 
-        spheres[i].color.x = (std::rand() % 100) / 100.0;
-        spheres[i].color.y = (std::rand() % 100) / 100.0;
-        spheres[i].color.z = (std::rand() % 100) / 100.0;
+        //this changes the random initial Euler orientation to random initial Quaternion orientation
+        spheres[i].ori = eulerToQuaternion(roll, pitch, yaw);
 
+        //spheres[i].ori = {1,0,0,0} one of random initial quaternion orientation
+
+        // Random angular velocity
+        spheres[i].angVel.x = ((std::rand() % 100) / 100.0 - 0.5) * 2.0; // [-1, 1] rad/s
+        spheres[i].angVel.y = ((std::rand() % 100) / 100.0 - 0.5) * 2.0; // [-1, 1] rad/s
+        spheres[i].angVel.z = ((std::rand() % 100) / 100.0 - 0.5) * 2.0; // [-1, 1] rad/s
+
+        // Random color
+        spheres[i].color.x = (std::rand() % 100) / 100.0; // [0, 1]
+        spheres[i].color.y = (std::rand() % 100) / 100.0; // [0, 1]
+        spheres[i].color.z = (std::rand() % 100) / 100.0; // [0, 1]
     }
 }
 
 //==================================================
 // Physics Update
 //==================================================
-void handleFloorCollision(Sphere& s) {
-    if (s.pos.y - s.radius < floorLevel) {
-        s.pos.y = floorLevel + s.radius;
-        s.vel.y = -s.vel.y * restitution;
-        s.vel.x *= groundFriction;
-        s.vel.z *= groundFriction;
-        s.angVel.x *= 0.9; s.angVel.y *= 0.9; s.angVel.z *= 0.9;
+void handleFloorCollision(Rigidbody& ball) {
+    if (ball.pos.y - ball.radius < floorLevel) {
+        // Correct position
+        ball.pos.y = floorLevel + ball.radius;
+
+        // Reflect velocity with restitution
+        ball.vel.y = -ball.vel.y * restitution;
+
+        // Apply ground friction to horizontal velocities
+        ball.vel.x *= groundFriction;
+        ball.vel.z *= groundFriction;
+
+        // Apply angular friction
+        ball.angVel.x *= 0.9;
+        ball.angVel.y *= 0.9;
+        ball.angVel.z *= 0.9;
     }
 }
 
@@ -119,13 +150,18 @@ void handleSphereCollisions() {
             if (dist2 < minDist * minDist) {
                 double dist = std::sqrt(dist2);
                 if (dist < 1e-8) {
+                    // Prevent division by zero; arbitrarily set direction
                     diff.x = 0.0; diff.y = 1.0; diff.z = 0.0;
                     dist = minDist;
                 }
                 else {
-                    diff.x /= dist; diff.y /= dist; diff.z /= dist;
+                    // Normalize difference vector
+                    diff.x /= dist;
+                    diff.y /= dist;
+                    diff.z /= dist;
                 }
 
+                // Positional correction to avoid sinking
                 double overlap = (minDist - dist) * 0.5;
                 spheres[i].pos.x -= diff.x * overlap;
                 spheres[i].pos.y -= diff.y * overlap;
@@ -135,56 +171,72 @@ void handleSphereCollisions() {
                 spheres[j].pos.y += diff.y * overlap;
                 spheres[j].pos.z += diff.z * overlap;
 
+                // Relative velocity
                 double rvx = spheres[j].vel.x - spheres[i].vel.x;
                 double rvy = spheres[j].vel.y - spheres[i].vel.y;
                 double rvz = spheres[j].vel.z - spheres[i].vel.z;
 
                 double relativeVel = rvx * diff.x + rvy * diff.y + rvz * diff.z;
 
-                if (relativeVel < 0.0) {
-                    double e = restitution;
-                    double invMass1 = 1.0 / spheres[i].mass;
-                    double invMass2 = 1.0 / spheres[j].mass;
-                    double jImpulse = -(1 + e) * relativeVel / (invMass1 + invMass2);
+                // Do not resolve if velocities are separating
+                if (relativeVel > 0.0)
+                    continue;
 
-                    spheres[i].vel.x -= jImpulse * diff.x * invMass1;
-                    spheres[i].vel.y -= jImpulse * diff.y * invMass1;
-                    spheres[i].vel.z -= jImpulse * diff.z * invMass1;
+                // Compute restitution
+                double e = restitution;
 
-                    spheres[j].vel.x += jImpulse * diff.x * invMass2;
-                    spheres[j].vel.y += jImpulse * diff.y * invMass2;
-                    spheres[j].vel.z += jImpulse * diff.z * invMass2;
+                // Compute impulse scalar
+                double jImpulse = -(1 + e) * relativeVel;
+                jImpulse /= (1.0 / spheres[i].mass) + (1.0 / spheres[j].mass);
 
-                    spheres[i].angVel.x += (std::rand() % 100 / 100.0 - 0.5) * 0.2;
-                    spheres[i].angVel.y += (std::rand() % 100 / 100.0 - 0.5) * 0.2;
-                    spheres[i].angVel.z += (std::rand() % 100 / 100.0 - 0.5) * 0.2;
+                // Apply impulse
+                Vec3 impulse = { diff.x * jImpulse, diff.y * jImpulse, diff.z * jImpulse };
+                spheres[i].vel.x -= impulse.x * (1.0 / spheres[i].mass);
+                spheres[i].vel.y -= impulse.y * (1.0 / spheres[i].mass);
+                spheres[i].vel.z -= impulse.z * (1.0 / spheres[i].mass);
 
-                    spheres[j].angVel.x += (std::rand() % 100 / 100.0 - 0.5) * 0.2;
-                    spheres[j].angVel.y += (std::rand() % 100 / 100.0 - 0.5) * 0.2;
-                    spheres[j].angVel.z += (std::rand() % 100 / 100.0 - 0.5) * 0.2;
-                }
+                spheres[j].vel.x += impulse.x * (1.0 / spheres[j].mass);
+                spheres[j].vel.y += impulse.y * (1.0 / spheres[j].mass);
+                spheres[j].vel.z += impulse.z * (1.0 / spheres[j].mass);
+
+                // Apply random angular velocity changes to simulate spin
+                spheres[i].angVel.x += ((((std::rand() % 100) / 100.0 - 0.5) * 0.2)/spheres[i].momentOfInertia);
+                spheres[i].angVel.y += ((((std::rand() % 100) / 100.0 - 0.5) * 0.2)/spheres[i].momentOfInertia);
+                spheres[i].angVel.z += ((((std::rand() % 100) / 100.0 - 0.5) * 0.2)/spheres[i].momentOfInertia);
+
+                spheres[j].angVel.x += ((((std::rand() % 100) / 100.0 - 0.5) * 0.2)/spheres[j].momentOfInertia);
+                spheres[j].angVel.y += ((((std::rand() % 100) / 100.0 - 0.5) * 0.2)/spheres[j].momentOfInertia);
+                spheres[j].angVel.z += ((((std::rand() % 100) / 100.0 - 0.5) * 0.2)/spheres[j].momentOfInertia);
+
             }
         }
     }
 }
 
 void updatePhysics() {
+    // Gravity vector
     Vec3 gravity = { 0.0, -9.8, 0.0 };
 
+    // Update each sphere
     for (int i = 0; i < NUM_SPHERES; i++) {
+        // Apply gravity
         spheres[i].vel.x += gravity.x * dt;
         spheres[i].vel.y += gravity.y * dt;
         spheres[i].vel.z += gravity.z * dt;
 
+        // Update position based on velocity
         spheres[i].pos.x += spheres[i].vel.x * dt;
         spheres[i].pos.y += spheres[i].vel.y * dt;
         spheres[i].pos.z += spheres[i].vel.z * dt;
 
+        // Handle collision with floor
         handleFloorCollision(spheres[i]);
 
+        // Integrate orientation based on angular velocity
         spheres[i].ori = quatIntegrate(spheres[i].ori, spheres[i].angVel, dt);
     }
 
+    // Handle collisions between spheres
     handleSphereCollisions();
 }
 
@@ -193,26 +245,27 @@ void updatePhysics() {
 //==================================================
 static GLfloat light0_pos[4] = { 10.0f, 20.0f, 10.0f, 1.0f };
 
-void drawSphere(const Sphere& s) {
+void drawSphere(const Rigidbody& ball) {
     glPushMatrix();
-    float M[16];
+    float rotation[16];
     // Build the full transform matrix from the quaternion and position
-    buildTransformMatrix(s.ori, s.pos, M);
+    buildTransformMatrix(ball.ori, ball.pos, rotation);
 
     // Apply the full transformation using matrix multiplication
-    glMultMatrixf(M);
+    glMultMatrixf(rotation);
 
     // Set the sphere color
-    glColor3f((GLfloat)s.color.x, (GLfloat)s.color.y, (GLfloat)s.color.z);
-    // Draw the sphere at the origin of local coordinates
-    glutSolidSphere(s.radius, 50, 50);
+    glColor3f((ball.color.x), (ball.color.y),(ball.color.z));
+
+    // Draw the sphere with number of polygons
+    glutSolidSphere(static_cast<float>(ball.radius), 100, 100);
     glPopMatrix();
 }
 
 void renderFloor() {
     glDisable(GL_LIGHTING);
-    glColor3f(0.3f, 0.9f, 0.3f);
-    double size = 30.0;
+    glColor3f(0.3f, 0.9f, 0.3f); // Green floor
+    double size = 25.0;
     glBegin(GL_QUADS);
     glVertex3f(-size, floorLevel, -size);
     glVertex3f(size, floorLevel, -size);
@@ -222,10 +275,8 @@ void renderFloor() {
     glEnable(GL_LIGHTING);
 }
 
-void display() {
-    
-    glClearColor(0.0f, 0.0f, 0.0f, 0.0f); // black background
-    //glClearDepth(1.0f);
+void render() {
+    glClearColor(0.0f, 0.0f, 0.0f, 0.0f); // Black background
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
     // Render state
@@ -262,21 +313,19 @@ void display() {
     glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
 
-    
     // Applying camera transforms
-    gluLookAt(0.0f, 20.0f, 30.0f,   // Eye position
-        0.0f, 0.0f, 0.0f,    // Look-at point
-        0.0f, 1.0f, 0.0f);   // Up direction
+    gluLookAt(0.0f, 20.0f, 40.0f,   // Eye position
+        0.0f, 0.0f, 0.0f,     // Look-at point
+        0.0f, 1.0f, 0.0f);    // Up direction
 
     glLightfv(GL_LIGHT0, GL_POSITION, light0_pos);
 
+    glDisable(GL_LIGHTING);
     // Render ground
-    glDisable(GL_LIGHTING); // Disable lighting for ground
     renderFloor();
-    glEnable(GL_LIGHTING);  // Re-enable lighting
-    
- 
+    glEnable(GL_LIGHTING);
 
+    // Render all spheres
     for (int i = 0; i < NUM_SPHERES; i++) {
         drawSphere(spheres[i]);
     }
@@ -294,37 +343,59 @@ void reshape(int w, int h) {
     glMatrixMode(GL_MODELVIEW);
 }
 
-void timerFunc(int value) {
+//==================================================
+// Timer Callback using Frame Time for Dynamic dt
+//==================================================
+void timer(int value) {
+    // Get current time 
+    double currentTime = glutGet(GLUT_ELAPSED_TIME)/1000.0; //time in seconds
+    
+    double frameTime = currentTime - lastFrameTime;
+    lastFrameTime = currentTime;
+    totalTime += dt;
+   
+
+    // Update physics with dynamic dt
     updatePhysics();
+
+    // Render
     glutPostRedisplay();
-    glutTimerFunc((unsigned int)(dt * 1000), timerFunc, 0);
+
+    // Register ext timer callback
+    glutTimerFunc(16, timer, 0); 
 }
 
 void keyboard(unsigned char key, int x, int y) {
-    if (key == 27) {
+    if (key == 27) { // ESC key
         exit(0);
     }
 }
 
 int main(int argc, char** argv) {
+    // Initialize GLUT
     glutInit(&argc, argv);
     glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB | GLUT_DEPTH);
     glutInitWindowSize(g_windowWidth, g_windowHeight);
-    glutCreateWindow("Physics-Based Bouncing Spheres with Quaternion Orientation (No glRotate)");
+    glutCreateWindow("Physics-Based Motion Control System");
 
+    // Initialize spheres
     initSpheres();
 
+    // Enable OpenGL features
     glEnable(GL_LIGHTING);
     glEnable(GL_LIGHT0);
     glEnable(GL_NORMALIZE);
     glEnable(GL_COLOR_MATERIAL);
     glColorMaterial(GL_FRONT, GL_AMBIENT_AND_DIFFUSE);
 
-    glutDisplayFunc(display);
+    
+    // Register callbacks
+    glutDisplayFunc(render);
     glutReshapeFunc(reshape);
     glutKeyboardFunc(keyboard);
-    glutTimerFunc((unsigned int)(dt * 1000), timerFunc, 0);
+    glutTimerFunc(16, timer, 0);
 
+    // Enter the GLUT main loop
     glutMainLoop();
 
     return 0;

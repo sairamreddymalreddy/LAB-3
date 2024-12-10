@@ -3,52 +3,64 @@
 #include<cmath>
 #include "Quaternion.h"
 
-Quaternion quatNormalize(Quaternion q) {
+// Normalize a quaternion
+Quaternion quatNormalize(const Quaternion& q) {
     double mag = std::sqrt(q.w * q.w + q.x * q.x + q.y * q.y + q.z * q.z);
-    q.w /= mag; q.x /= mag; q.y /= mag; q.z /= mag;
-    return q;
+    return Quaternion{ q.w / mag, q.x / mag, q.y / mag, q.z / mag };
+    
 }
 
-Quaternion quatFromAxisAngle(Vec3 axis, double angle) {
-    double half = angle * 0.5;
-    double s = std::sin(half);
+// Create a quaternion from Euler angles (in radians)
+Quaternion eulerToQuaternion(double roll, double pitch, double yaw) {
+    double cy = cos(yaw * 0.5);
+    double sy = sin(yaw * 0.5);
+    double cp = cos(pitch * 0.5);
+    double sp = sin(pitch * 0.5);
+    double cr = cos(roll * 0.5);
+    double sr = sin(roll * 0.5);
+
     Quaternion q;
-    q.w = std::cos(half);
-    q.x = axis.x * s;
-    q.y = axis.y * s;
-    q.z = axis.z * s;
+    q.w = cr * cp * cy + sr * sp * sy;
+    q.x = sr * cp * cy - cr * sp * sy;
+    q.y = cr * sp * cy + sr * cp * sy;
+    q.z = cr * cp * sy - sr * sp * cy;
+
     return quatNormalize(q);
 }
 
+// Multiply two quaternions
 Quaternion quatMultiply(const Quaternion& q1, const Quaternion& q2) {
-    Quaternion q;
-    q.w = q1.w * q2.w - q1.x * q2.x - q1.y * q2.y - q1.z * q2.z;
-    q.x = q1.w * q2.x + q1.x * q2.w + q1.y * q2.z - q1.z * q2.y;
-    q.y = q1.w * q2.y - q1.x * q2.z + q1.y * q2.w + q1.z * q2.x;
-    q.z = q1.w * q2.z + q1.x * q2.y - q1.y * q2.x + q1.z * q2.w;
-    return q;
+    return q1 * q2;
 }
 
-Quaternion quatIntegrate(Quaternion q, Vec3 w, double dt) {
+// Integrate quaternion orientation given an angular velocity over a time step
+Quaternion quatIntegrate(const Quaternion& q, const Vec3& w, double dt) {
+    // Convert angular velocity to quaternion (0, wx, wy, wz)
     Quaternion Wq = { 0.0, w.x, w.y, w.z };
 
+    // dq/dt = 0.5 * q * Wq
     Quaternion dq;
-    dq.w = 0.5 * (Wq.w * q.w - Wq.x * q.x - Wq.y * q.y - Wq.z * q.z);
-    dq.x = 0.5 * (Wq.w * q.x + Wq.x * q.w + Wq.y * q.z - Wq.z * q.y);
-    dq.y = 0.5 * (Wq.w * q.y - Wq.x * q.z + Wq.y * q.w + Wq.z * q.x);
-    dq.z = 0.5 * (Wq.w * q.z + Wq.x * q.y - Wq.y * q.x + Wq.z * q.w);
+    dq.w = 0.5 * (q.x * Wq.x + q.y * Wq.y + q.z * Wq.z);
+    dq.x = 0.5 * (q.w * Wq.x + q.y * Wq.z - q.z * Wq.y);
+    dq.y = 0.5 * (q.w * Wq.y - q.x * Wq.z + q.z * Wq.x);
+    dq.z = 0.5 * (q.w * Wq.z + q.x * Wq.y - q.y * Wq.x);
 
-    q.w += dq.w * dt;
-    q.x += dq.x * dt;
-    q.y += dq.y * dt;
-    q.z += dq.z * dt;
-    return quatNormalize(q);
+    // Update quaternion
+    Quaternion newQ;
+    newQ.w = q.w + dq.w * dt;
+    newQ.x = q.x + dq.x * dt;
+    newQ.y = q.y + dq.y * dt;
+    newQ.z = q.z + dq.z * dt;
+
+    return quatNormalize(newQ);
 }
 
-void quaternionToMatrix(const Quaternion& q, float* M) {
+// Convert a quaternion to a 4x4 rotation matrix (column-major order)
+void quaternionToMatrix(const Quaternion& q, GLfloat* rotation) {
     double x2 = q.x + q.x;
     double y2 = q.y + q.y;
     double z2 = q.z + q.z;
+
     double xx = q.x * x2;
     double xy = q.x * y2;
     double xz = q.x * z2;
@@ -59,31 +71,33 @@ void quaternionToMatrix(const Quaternion& q, float* M) {
     double wy = q.w * y2;
     double wz = q.w * z2;
 
-    M[0] = (float)(1.0 - (yy + zz));
-    M[1] = (float)(xy + wz);
-    M[2] = (float)(xz - wy);
-    M[3] = 0.0f;
+    rotation[0] = (1.0 - (yy + zz));
+    rotation[1] = (xy + wz);
+    rotation[2] = (xz - wy);
+    rotation[3] = 0.0f;
 
-    M[4] = (float)(xy - wz);
-    M[5] = (float)(1.0 - (xx + zz));
-    M[6] = (float)(yz + wx);
-    M[7] = 0.0f;
+    rotation[4] = (xy - wz);
+    rotation[5] = (1.0 - (xx + zz));
+    rotation[6] = (yz + wx);
+    rotation[7] = 0.0f;
 
-    M[8] = (float)(xz + wy);
-    M[9] = (float)(yz - wx);
-    M[10] = (float)(1.0 - (xx + yy));
-    M[11] = 0.0f;
+    rotation[8] = (xz + wy);
+    rotation[9] = (yz - wx);
+    rotation[10] = (1.0 - (xx + yy));
+    rotation[11] = 0.0f;
 
-    M[12] = 0.0f;
-    M[13] = 0.0f;
-    M[14] = 0.0f;
-    M[15] = 1.0f;
+    rotation[12] = 0.0f;
+    rotation[13] = 0.0f;
+    rotation[14] = 0.0f;
+    rotation[15] = 1.0f;
 }
 
-void buildTransformMatrix(const Quaternion& q, const Vec3& t, float* M) {
-    quaternionToMatrix(q, M);
+// Build a complete 4x4 transform matrix from quaternion (rotation) and a position vector (translation)
+void buildTransformMatrix(const Quaternion& q, const Vec3& t, GLfloat* rotation) {
+    quaternionToMatrix(q, rotation);
     // Insert translation
-    M[12] = (float)t.x;
-    M[13] = (float)t.y;
-    M[14] = (float)t.z;
+    rotation[12] = (t.x);
+    rotation[13] = (t.y);
+    rotation[14] = (t.z);
 }
+

@@ -158,6 +158,7 @@
   <ItemGroup>
     <Text Include="input.txt" />
     <Text Include="Readme for LAB-2 Instructions.txt" />
+    <Text Include="Readme for LAB-3 Instructions.txt" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
