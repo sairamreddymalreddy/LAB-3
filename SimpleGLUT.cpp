@@ -260,7 +260,7 @@ void drawSphere(const Rigidbody& ball) {
     glColor3f((ball.color.x), (ball.color.y),(ball.color.z));
 
     // Draw the sphere with number of polygons
-    glutSolidSphere(static_cast<float>(ball.radius), 100, 100);
+    glutSolidSphere(ball.radius, 100, 100);
     glPopMatrix();
 }
 
